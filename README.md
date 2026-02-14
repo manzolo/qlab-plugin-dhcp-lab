@@ -13,10 +13,10 @@ A [QLab](https://github.com/manzolo/qlab) plugin that boots two virtual machines
 ┌─────────────────────────────────────┐
 │                                     │
 │  ┌─────────────────┐  ┌─────────────────┐
-│  │ dhcp-lab-server  │  │ dhcp-lab-client │
-│  │ SSH: 2238        │  │ SSH: 2239       │
-│  │ 192.168.100.1    │──►  IP via DHCP    │
-│  │ isc-dhcp-server  │  │  (.100-.200)    │
+│  │ dhcp-lab-server │  │ dhcp-lab-client │
+│  │ SSH: 2238       │  │ SSH: 2239       │
+│  │ 192.168.100.1   │──►  IP via DHCP    │
+│  │ isc-dhcp-server │  │  (.100-.200)    │
 │  └─────────────────┘  └─────────────────┘
 │                                     │
 └─────────────────────────────────────┘
