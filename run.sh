@@ -1,0 +1,409 @@
+#!/usr/bin/env bash
+# dhcp-lab run script — boots two VMs for DHCP configuration labs
+
+set -euo pipefail
+
+PLUGIN_NAME="dhcp-lab"
+SERVER_VM="dhcp-lab-server"
+CLIENT_VM="dhcp-lab-client"
+SERVER_SSH_PORT=2238
+CLIENT_SSH_PORT=2239
+
+# Internal LAN — direct VM-to-VM link via QEMU socket multicast
+INTERNAL_MCAST="230.0.0.1:10002"
+SERVER_INTERNAL_IP="192.168.100.1"
+SERVER_LAN_MAC="52:54:00:00:03:01"
+CLIENT_LAN_MAC="52:54:00:00:03:02"
+
+# DHCP pool configuration
+DHCP_RANGE_START="192.168.100.100"
+DHCP_RANGE_END="192.168.100.200"
+DHCP_SUBNET="192.168.100.0"
+DHCP_NETMASK="255.255.255.0"
+
+echo "============================================="
+echo "  dhcp-lab: DHCP Configuration Lab"
+echo "============================================="
+echo ""
+echo "  This lab creates two VMs connected by an"
+echo "  internal LAN (192.168.100.0/24):"
+echo ""
+echo "    1. $SERVER_VM  (SSH port $SERVER_SSH_PORT)"
+echo "       Static IP: $SERVER_INTERNAL_IP"
+echo "       Runs isc-dhcp-server"
+echo ""
+echo "    2. $CLIENT_VM  (SSH port $CLIENT_SSH_PORT)"
+echo "       Gets IP via DHCP from the server"
+echo "       Range: $DHCP_RANGE_START - $DHCP_RANGE_END"
+echo ""
+
+# Source QLab core libraries
+if [[ -z "${QLAB_ROOT:-}" ]]; then
+    echo "ERROR: QLAB_ROOT not set. Run this plugin via 'qlab run ${PLUGIN_NAME}'."
+    exit 1
+fi
+
+for lib_file in "$QLAB_ROOT"/lib/*.bash; do
+    # shellcheck source=/dev/null
+    [[ -f "$lib_file" ]] && source "$lib_file"
+done
+
+# Configuration
+WORKSPACE_DIR="${WORKSPACE_DIR:-.qlab}"
+LAB_DIR="lab"
+IMAGE_DIR="$WORKSPACE_DIR/images"
+CLOUD_IMAGE_URL=$(get_config CLOUD_IMAGE_URL "https://cloud-images.ubuntu.com/minimal/releases/jammy/release/ubuntu-22.04-minimal-cloudimg-amd64.img")
+CLOUD_IMAGE_FILE="$IMAGE_DIR/ubuntu-22.04-minimal-cloudimg-amd64.img"
+MEMORY="${QLAB_MEMORY:-$(get_config DEFAULT_MEMORY 1024)}"
+
+# Ensure directories exist
+mkdir -p "$LAB_DIR" "$IMAGE_DIR"
+
+# =============================================
+# Step 1: Download cloud image (shared by both VMs)
+# =============================================
+info "Step 1: Cloud image"
+if [[ -f "$CLOUD_IMAGE_FILE" ]]; then
+    success "Cloud image already downloaded: $CLOUD_IMAGE_FILE"
+else
+    echo ""
+    echo "  Cloud images are pre-built OS images designed for cloud environments."
+    echo "  Both VMs will share the same base image via overlay disks."
+    echo ""
+    info "Downloading Ubuntu cloud image..."
+    echo "  URL: $CLOUD_IMAGE_URL"
+    echo "  This may take a few minutes depending on your connection."
+    echo ""
+    check_dependency curl || exit 1
+    curl -L -o "$CLOUD_IMAGE_FILE" "$CLOUD_IMAGE_URL" || {
+        error "Failed to download cloud image."
+        echo "  Check your internet connection and try again."
+        exit 1
+    }
+    success "Cloud image downloaded: $CLOUD_IMAGE_FILE"
+fi
+echo ""
+
+# =============================================
+# Step 2: Cloud-init configurations
+# =============================================
+info "Step 2: Cloud-init configuration for both VMs"
+echo ""
+
+# --- DHCP Server VM cloud-init ---
+info "Creating cloud-init for $SERVER_VM..."
+cat > "$LAB_DIR/user-data-server" <<'USERDATA'
+#cloud-config
+hostname: dhcp-lab-server
+package_update: true
+users:
+  - name: labuser
+    plain_text_passwd: labpass
+    lock_passwd: false
+    sudo: ALL=(ALL) NOPASSWD:ALL
+    shell: /bin/bash
+    ssh_authorized_keys:
+      - "__QLAB_SSH_PUB_KEY__"
+ssh_pwauth: true
+packages:
+  - isc-dhcp-server
+  - nano
+  - net-tools
+  - iputils-ping
+  - tcpdump
+write_files:
+  - path: /etc/profile.d/cloud-init-status.sh
+    permissions: '0755'
+    content: |
+      #!/bin/bash
+      if command -v cloud-init >/dev/null 2>&1; then
+        status=$(cloud-init status 2>/dev/null)
+        if echo "$status" | grep -q "running"; then
+          printf '\033[1;33m'
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "  Cloud-init is still running..."
+          echo "  Some packages and services may not be ready yet."
+          echo "  Run 'cloud-init status --wait' to wait for completion."
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          printf '\033[0m\n'
+        fi
+      fi
+  - path: /etc/netplan/60-internal.yaml
+    content: |
+      network:
+        version: 2
+        ethernets:
+          dhcplan:
+            match:
+              macaddress: "52:54:00:00:03:01"
+            addresses:
+              - 192.168.100.1/24
+  - path: /etc/dhcp/dhcpd.conf
+    content: |
+      # DHCP Server Configuration — dhcp-lab
+      # This is the main configuration file for isc-dhcp-server.
+
+      # Global options
+      option domain-name "dhcp-lab.local";
+      option domain-name-servers 8.8.8.8, 8.8.4.4;
+      default-lease-time 600;
+      max-lease-time 7200;
+      authoritative;
+
+      # Subnet declaration for the internal LAN
+      subnet 192.168.100.0 netmask 255.255.255.0 {
+        range 192.168.100.100 192.168.100.200;
+        option routers 192.168.100.1;
+        option subnet-mask 255.255.255.0;
+        option broadcast-address 192.168.100.255;
+      }
+
+      # Example: static reservation (uncomment and modify)
+      # host client-reserved {
+      #   hardware ethernet 52:54:00:00:03:02;
+      #   fixed-address 192.168.100.50;
+      # }
+  - path: /etc/motd.raw
+    content: |
+      \033[1;36m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\033[0m
+        \033[1;32mdhcp-lab-server\033[0m — \033[1mDHCP Server Lab\033[0m
+      \033[1;36m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\033[0m
+
+        \033[1;33mRole:\033[0m  DHCP Server VM
+        \033[1;33mStatic IP:\033[0m  \033[1;36m192.168.100.1\033[0m
+
+        \033[1;33mDHCP Pool:\033[0m
+          Range:     \033[0;32m192.168.100.100 - 192.168.100.200\033[0m
+          Lease:     600s (default) / 7200s (max)
+          Gateway:   192.168.100.1
+          DNS:       8.8.8.8, 8.8.4.4
+
+        \033[1;33mUseful commands:\033[0m
+          \033[0;32msudo systemctl status isc-dhcp-server\033[0m   check service
+          \033[0;32msudo systemctl restart isc-dhcp-server\033[0m  restart after config change
+          \033[0;32msudo dhcp-lease-list\033[0m                    show active leases
+          \033[0;32mcat /var/lib/dhcp/dhcpd.leases\033[0m         raw lease file
+          \033[0;32msudo nano /etc/dhcp/dhcpd.conf\033[0m         edit config
+          \033[0;32msudo tcpdump -i any -n port 67 or port 68\033[0m  capture DHCP traffic
+
+        \033[1;33mCredentials:\033[0m  \033[1;36mlabuser\033[0m / \033[1;36mlabpass\033[0m
+        \033[1;33mExit:\033[0m         type '\033[1;31mexit\033[0m'
+
+      \033[1;36m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\033[0m
+
+
+runcmd:
+  - netplan apply
+  - |
+    # Find the interface matching the DHCP LAN MAC address
+    DHCP_IFACE=$(ip -o link | grep "52:54:00:00:03:01" | awk -F': ' '{print $2}')
+    if [ -n "$DHCP_IFACE" ]; then
+      sed -i "s/^INTERFACESv4=.*/INTERFACESv4=\"$DHCP_IFACE\"/" /etc/default/isc-dhcp-server
+    fi
+  - systemctl restart isc-dhcp-server
+  - systemctl enable isc-dhcp-server
+  - chmod -x /etc/update-motd.d/*
+  - sed -i 's/^#\?PrintMotd.*/PrintMotd yes/' /etc/ssh/sshd_config
+  - sed -i 's/^session.*pam_motd.*/# &/' /etc/pam.d/sshd
+  - printf '%b\n' "$(cat /etc/motd.raw)" > /etc/motd
+  - rm -f /etc/motd.raw
+  - systemctl restart sshd
+  - echo "=== dhcp-lab-server VM is ready! ==="
+USERDATA
+
+# Inject the SSH public key into user-data
+sed -i "s|__QLAB_SSH_PUB_KEY__|${QLAB_SSH_PUB_KEY:-}|g" "$LAB_DIR/user-data-server"
+
+cat > "$LAB_DIR/meta-data-server" <<METADATA
+instance-id: ${SERVER_VM}-001
+local-hostname: ${SERVER_VM}
+METADATA
+
+success "Created cloud-init for $SERVER_VM"
+
+# --- DHCP Client VM cloud-init ---
+info "Creating cloud-init for $CLIENT_VM..."
+cat > "$LAB_DIR/user-data-client" <<'USERDATA'
+#cloud-config
+hostname: dhcp-lab-client
+package_update: true
+users:
+  - name: labuser
+    plain_text_passwd: labpass
+    lock_passwd: false
+    sudo: ALL=(ALL) NOPASSWD:ALL
+    shell: /bin/bash
+    ssh_authorized_keys:
+      - "__QLAB_SSH_PUB_KEY__"
+ssh_pwauth: true
+packages:
+  - nano
+  - net-tools
+  - iputils-ping
+  - tcpdump
+  - isc-dhcp-client
+write_files:
+  - path: /etc/profile.d/cloud-init-status.sh
+    permissions: '0755'
+    content: |
+      #!/bin/bash
+      if command -v cloud-init >/dev/null 2>&1; then
+        status=$(cloud-init status 2>/dev/null)
+        if echo "$status" | grep -q "running"; then
+          printf '\033[1;33m'
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "  Cloud-init is still running..."
+          echo "  Some packages and services may not be ready yet."
+          echo "  Run 'cloud-init status --wait' to wait for completion."
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          printf '\033[0m\n'
+        fi
+      fi
+  - path: /etc/netplan/60-internal.yaml
+    content: |
+      network:
+        version: 2
+        ethernets:
+          dhcplan:
+            match:
+              macaddress: "52:54:00:00:03:02"
+            dhcp4: true
+  - path: /etc/motd.raw
+    content: |
+      \033[1;36m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\033[0m
+        \033[1;31mdhcp-lab-client\033[0m — \033[1mDHCP Client Lab\033[0m
+      \033[1;36m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\033[0m
+
+        \033[1;33mRole:\033[0m  DHCP Client VM
+        \033[1;33mDHCP Server:\033[0m  \033[1;36m192.168.100.1\033[0m
+
+        \033[1;33mUseful commands:\033[0m
+          \033[0;32mip addr show\033[0m                           check assigned IP
+          \033[0;32msudo dhclient -v <iface>\033[0m               request a new lease
+          \033[0;32msudo dhclient -r <iface>\033[0m               release current lease
+          \033[0;32mcat /var/lib/dhcp/dhclient.leases\033[0m      view lease details
+          \033[0;32msudo netplan apply\033[0m                     re-apply netplan (trigger DHCP)
+          \033[0;32msudo tcpdump -i any -n port 67 or port 68\033[0m  capture DHCP traffic
+          \033[0;32msudo ping 192.168.100.1\033[0m                ping the DHCP server
+
+        \033[1;33mDHCP DORA process:\033[0m
+          1. \033[0;32mDiscover\033[0m  — client broadcasts to find servers
+          2. \033[0;32mOffer\033[0m     — server offers an IP address
+          3. \033[0;32mRequest\033[0m   — client requests the offered IP
+          4. \033[0;32mAck\033[0m       — server confirms the assignment
+
+        \033[1;33mCredentials:\033[0m  \033[1;36mlabuser\033[0m / \033[1;36mlabpass\033[0m
+        \033[1;33mExit:\033[0m         type '\033[1;31mexit\033[0m'
+
+      \033[1;36m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\033[0m
+
+
+runcmd:
+  - netplan apply
+  - chmod -x /etc/update-motd.d/*
+  - sed -i 's/^#\?PrintMotd.*/PrintMotd yes/' /etc/ssh/sshd_config
+  - sed -i 's/^session.*pam_motd.*/# &/' /etc/pam.d/sshd
+  - printf '%b\n' "$(cat /etc/motd.raw)" > /etc/motd
+  - rm -f /etc/motd.raw
+  - systemctl restart sshd
+  - echo "=== dhcp-lab-client VM is ready! ==="
+USERDATA
+
+# Inject the SSH public key into user-data
+sed -i "s|__QLAB_SSH_PUB_KEY__|${QLAB_SSH_PUB_KEY:-}|g" "$LAB_DIR/user-data-client"
+
+cat > "$LAB_DIR/meta-data-client" <<METADATA
+instance-id: ${CLIENT_VM}-001
+local-hostname: ${CLIENT_VM}
+METADATA
+
+success "Created cloud-init for $CLIENT_VM"
+echo ""
+
+# =============================================
+# Step 3: Generate cloud-init ISOs
+# =============================================
+info "Step 3: Cloud-init ISOs"
+echo ""
+check_dependency genisoimage || {
+    warn "genisoimage not found. Install it with: sudo apt install genisoimage"
+    exit 1
+}
+
+CIDATA_SERVER="$LAB_DIR/cidata-server.iso"
+genisoimage -output "$CIDATA_SERVER" -volid cidata -joliet -rock \
+    -graft-points "user-data=$LAB_DIR/user-data-server" "meta-data=$LAB_DIR/meta-data-server" 2>/dev/null
+success "Created cloud-init ISO: $CIDATA_SERVER"
+
+CIDATA_CLIENT="$LAB_DIR/cidata-client.iso"
+genisoimage -output "$CIDATA_CLIENT" -volid cidata -joliet -rock \
+    -graft-points "user-data=$LAB_DIR/user-data-client" "meta-data=$LAB_DIR/meta-data-client" 2>/dev/null
+success "Created cloud-init ISO: $CIDATA_CLIENT"
+echo ""
+
+# =============================================
+# Step 4: Create overlay disks
+# =============================================
+info "Step 4: Overlay disks"
+echo ""
+echo "  Each VM gets its own overlay disk (copy-on-write) so the"
+echo "  base cloud image is never modified."
+echo ""
+
+OVERLAY_SERVER="$LAB_DIR/${SERVER_VM}-disk.qcow2"
+if [[ -f "$OVERLAY_SERVER" ]]; then rm -f "$OVERLAY_SERVER"; fi
+create_overlay "$CLOUD_IMAGE_FILE" "$OVERLAY_SERVER" "${QLAB_DISK_SIZE:-}"
+
+OVERLAY_CLIENT="$LAB_DIR/${CLIENT_VM}-disk.qcow2"
+if [[ -f "$OVERLAY_CLIENT" ]]; then rm -f "$OVERLAY_CLIENT"; fi
+create_overlay "$CLOUD_IMAGE_FILE" "$OVERLAY_CLIENT" "${QLAB_DISK_SIZE:-}"
+echo ""
+
+# =============================================
+# Step 5: Start both VMs
+# =============================================
+info "Step 5: Starting VMs (internal LAN: 192.168.100.0/24)"
+echo ""
+
+info "Starting $SERVER_VM (SSH port $SERVER_SSH_PORT)..."
+start_vm "$OVERLAY_SERVER" "$CIDATA_SERVER" "$MEMORY" "$SERVER_VM" "$SERVER_SSH_PORT" \
+    "-netdev" "socket,id=vlan1,mcast=${INTERNAL_MCAST}" \
+    "-device" "virtio-net-pci,netdev=vlan1,mac=${SERVER_LAN_MAC}"
+
+echo ""
+
+info "Starting $CLIENT_VM (SSH port $CLIENT_SSH_PORT)..."
+start_vm "$OVERLAY_CLIENT" "$CIDATA_CLIENT" "$MEMORY" "$CLIENT_VM" "$CLIENT_SSH_PORT" \
+    "-netdev" "socket,id=vlan1,mcast=${INTERNAL_MCAST}" \
+    "-device" "virtio-net-pci,netdev=vlan1,mac=${CLIENT_LAN_MAC}"
+
+echo ""
+echo "============================================="
+echo "  dhcp-lab: Both VMs are booting"
+echo "============================================="
+echo ""
+echo "  DHCP Server VM:"
+echo "    SSH:          qlab shell $SERVER_VM"
+echo "    Log:          qlab log $SERVER_VM"
+echo "    Static IP:    $SERVER_INTERNAL_IP"
+echo ""
+echo "  DHCP Client VM:"
+echo "    SSH:          qlab shell $CLIENT_VM"
+echo "    Log:          qlab log $CLIENT_VM"
+echo "    IP:           assigned via DHCP ($DHCP_RANGE_START - $DHCP_RANGE_END)"
+echo ""
+echo "  Internal LAN:  192.168.100.0/24"
+echo "  Credentials:   labuser / labpass"
+echo ""
+echo "  Wait ~90s for boot + package installation."
+echo ""
+echo "  Stop both VMs:"
+echo "    qlab stop $PLUGIN_NAME"
+echo ""
+echo "  Stop a single VM:"
+echo "    qlab stop $SERVER_VM"
+echo "    qlab stop $CLIENT_VM"
+echo ""
+echo "  Tip: override resources with environment variables:"
+echo "    QLAB_MEMORY=4096 QLAB_DISK_SIZE=30G qlab run ${PLUGIN_NAME}"
+echo "============================================="
