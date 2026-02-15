@@ -36,8 +36,8 @@ Each VM has **two network interfaces**:
 ```
         Host Machine
        ┌────────────┐
-       │  SSH :2238  │──────► dhcp-lab-server
-       │  SSH :2239  │──────► dhcp-lab-client
+       │  SSH :auto  │──────► dhcp-lab-server
+       │  SSH :auto  │──────► dhcp-lab-client
        └────────────┘
 
    Internal LAN (192.168.100.0/24)
