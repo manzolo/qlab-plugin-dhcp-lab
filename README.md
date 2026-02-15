@@ -14,7 +14,7 @@ A [QLab](https://github.com/manzolo/qlab) plugin that boots two virtual machines
 │                                     │
 │  ┌─────────────────┐  ┌─────────────────┐
 │  │ dhcp-lab-server │  │ dhcp-lab-client │
-│  │ SSH: 2238       │  │ SSH: 2239       │
+│  │ SSH: dynamic    │  │ SSH: dynamic    │
 │  │ 192.168.100.1   │──►  IP via DHCP    │
 │  │ isc-dhcp-server │  │  (.100-.200)    │
 │  └─────────────────┘  └─────────────────┘
@@ -49,8 +49,10 @@ Both VMs use the same credentials:
 
 | VM              | SSH (host) | Internal LAN IP     |
 |-----------------|------------|---------------------|
-| dhcp-lab-server | port 2238  | 192.168.100.1 (static) |
-| dhcp-lab-client | port 2239  | assigned via DHCP   |
+| dhcp-lab-server | dynamic    | 192.168.100.1 (static) |
+| dhcp-lab-client | dynamic    | assigned via DHCP   |
+
+> All host ports are dynamically allocated. Use `qlab ports` to see the actual mappings.
 
 The VMs are connected by a direct internal LAN (`192.168.100.0/24`) via QEMU socket networking. The server assigns addresses from the pool `192.168.100.100` - `192.168.100.200`.
 
