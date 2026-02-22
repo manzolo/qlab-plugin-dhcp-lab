@@ -63,14 +63,14 @@ The server has a static IP (`192.168.100.1`) and runs `isc-dhcp-server`. The cli
 On **dhcp-lab-server**:
 
 ```bash
-# Check isc-dhcp-server status
-sudo systemctl status isc-dhcp-server
+# Check isc-dhcp-server is running
+sudo systemctl is-active isc-dhcp-server
 
 # View the configuration
 cat /etc/dhcp/dhcpd.conf
 ```
 
-You should see the service active and the subnet `192.168.100.0/24` configured with a pool from `.100` to `.200`.
+You should see `active` printed, confirming the service is running, and the subnet `192.168.100.0/24` configured with a pool from `.100` to `.200`.
 
 ### 1.2 Check the client received an IP
 
@@ -84,14 +84,20 @@ ip addr show
 ip addr show | grep "192.168.100"
 ```
 
-If the client hasn't received an IP yet, trigger a DHCP request manually:
+The Ubuntu 22.04 cloud image uses **systemd-networkd** as the default DHCP client (via netplan). If the client hasn't received an IP yet, restart networkd:
 
 ```bash
 # Find the internal interface name
 IFACE=$(ip -o link | grep "52:54:00:00:03:02" | awk -F': ' '{print $2}')
 echo "Internal interface: $IFACE"
 
-# Request a DHCP lease
+# Restart networkd to trigger a DHCP request
+sudo systemctl restart systemd-networkd
+```
+
+Alternatively, if dhclient is installed, you can request a lease manually:
+
+```bash
 sudo dhclient -v "$IFACE"
 ```
 
@@ -125,16 +131,17 @@ sudo tcpdump -i any -n -v port 67 or port 68
 
 ### 2.2 Release and renew the client's lease
 
-On **dhcp-lab-client**, find the interface name and release/request:
+On **dhcp-lab-client**, restart networkd to trigger a new DHCP exchange:
 
 ```bash
-# Find the internal interface
+sudo systemctl restart systemd-networkd
+```
+
+Alternatively, if you want more control over the process (requires dhclient):
+
+```bash
 IFACE=$(ip -o link | grep "52:54:00:00:03:02" | awk -F': ' '{print $2}')
-
-# Release the current lease
 sudo dhclient -r "$IFACE"
-
-# Wait a moment, then request a new lease
 sudo dhclient -v "$IFACE"
 ```
 
@@ -179,21 +186,20 @@ Restart the service:
 sudo systemctl restart isc-dhcp-server
 ```
 
-On the **client**, release and renew to get the new lease time:
+On the **client**, restart networkd to pick up the new lease time:
 
 ```bash
-IFACE=$(ip -o link | grep "52:54:00:00:03:02" | awk -F': ' '{print $2}')
-sudo dhclient -r "$IFACE"
-sudo dhclient -v "$IFACE"
+sudo systemctl restart systemd-networkd
 ```
 
-Check the lease details:
+Check the lease details (systemd-networkd stores leases here):
 
 ```bash
-cat /var/lib/dhcp/dhclient.leases
+ls /run/systemd/netif/leases/
+cat /run/systemd/netif/leases/*
 ```
 
-You should see the shorter lease time reflected.
+You should see the shorter lease time reflected. If using dhclient instead, the lease file is at `/var/lib/dhcp/dhclient.leases`.
 
 ### 3.2 Add custom DNS servers
 
@@ -209,12 +215,10 @@ Restart and renew:
 sudo systemctl restart isc-dhcp-server
 ```
 
-On the **client**, verify:
+On the **client**, restart networkd and verify:
 
 ```bash
-IFACE=$(ip -o link | grep "52:54:00:00:03:02" | awk -F': ' '{print $2}')
-sudo dhclient -r "$IFACE"
-sudo dhclient -v "$IFACE"
+sudo systemctl restart systemd-networkd
 cat /etc/resolv.conf
 ```
 
@@ -243,12 +247,11 @@ sudo systemctl restart isc-dhcp-server
 
 ### 4.2 Verify
 
-On the **client**, release and renew:
+On the **client**, restart networkd to renew the lease:
 
 ```bash
 IFACE=$(ip -o link | grep "52:54:00:00:03:02" | awk -F': ' '{print $2}')
-sudo dhclient -r "$IFACE"
-sudo dhclient -v "$IFACE"
+sudo systemctl restart systemd-networkd
 ip addr show "$IFACE"
 ```
 
@@ -320,9 +323,9 @@ ip addr show
 
 ### Client doesn't get an IP
 
-1. Verify the server is running: `sudo systemctl status isc-dhcp-server`
+1. Verify the server is running: `sudo systemctl is-active isc-dhcp-server`
 2. Check the internal LAN works: can the server see the interface? (`ip addr show`)
-3. Run dhclient in verbose mode: `sudo dhclient -v <iface>`
+3. Restart networkd: `sudo systemctl restart systemd-networkd`
 4. Check tcpdump on both sides for DHCP packets
 
 ### Lease file is empty
@@ -330,13 +333,12 @@ ip addr show
 The server hasn't assigned any addresses yet. Trigger a request from the client:
 
 ```bash
-IFACE=$(ip -o link | grep "52:54:00:00:03:02" | awk -F': ' '{print $2}')
-sudo dhclient -v "$IFACE"
+sudo systemctl restart systemd-networkd
 ```
 
 ### General: packages not installed
 
-If commands like `dhcpd` or `dhclient` are not found, cloud-init may still be running:
+If commands like `dhcpd` are not found, cloud-init may still be running:
 
 ```bash
 cloud-init status --wait
