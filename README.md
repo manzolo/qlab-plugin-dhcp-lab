@@ -83,7 +83,7 @@ qlab stop dhcp-lab-client
 
 ## Exercises
 
-> **New to DHCP?** See the [Step-by-Step Guide](GUIDE.md) for complete walkthroughs with full config examples.
+> **New to DHCP?** See the [Step-by-Step Guide](guide.md) for complete walkthroughs with full config examples.
 
 | # | Exercise | What you'll do |
 |---|----------|----------------|
@@ -92,6 +92,17 @@ qlab stop dhcp-lab-client
 | 3 | **Modify DHCP options** | Change lease times, DNS servers, and domain name |
 | 4 | **Static reservation** | Reserve a fixed IP for the client's MAC address |
 | 5 | **Multiple pools** | Create separate pools with allow/deny rules |
+
+## Automated Tests
+
+An automated test suite validates the exercises against running VMs:
+
+```bash
+# Start the lab first
+qlab run dhcp-lab
+# Wait ~90s for cloud-init, then run all tests
+qlab test dhcp-lab
+```
 
 ## Managing VMs
 
