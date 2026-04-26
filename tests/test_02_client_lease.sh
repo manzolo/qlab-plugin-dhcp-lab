@@ -12,7 +12,8 @@ ping_result=$(ssh_client "ping -c 1 -W 3 192.168.100.1 2>/dev/null" || echo "")
 assert_contains "Client can ping server" "$ping_result" "1 received|1 packets received"
 
 # 2.3 Lease file exists on client (systemd-networkd or dhclient)
-lease_exists=$(ssh_client "ls /run/systemd/netif/leases/ /var/lib/dhcp/dhclient*.leases 2>/dev/null" || echo "")
+# Use find instead of glob to avoid zsh nomatch error when dhclient*.leases is absent
+lease_exists=$(ssh_client "ls -d /run/systemd/netif/leases/ 2>/dev/null; find /var/lib/dhcp/ -name 'dhclient*.leases' 2>/dev/null" || echo "")
 assert_contains "Client lease file exists" "$lease_exists" "leases|dhclient"
 
 report_results "Exercise 2"
