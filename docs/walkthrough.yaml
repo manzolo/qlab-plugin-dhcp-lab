@@ -1,0 +1,49 @@
+# dhcp-lab — what the walkthrough builder captures from a running lab.
+#
+#   tools/walkthrough/build.py <plugin-dir> --live --workspace <ws>
+#
+# Entries with `vm:` run over SSH inside that VM; the others run on the host,
+# which is how the DORA capture drives both machines at once.
+
+evidence:
+  - id: server-status
+    vm: dhcp-lab-server
+    cmd: systemctl is-active isc-dhcp-server; systemctl show isc-dhcp-server -p MainPID --value | xargs -I{} ps -o pid,etime,cmd --no-headers -p {}
+  - id: server-iface
+    vm: dhcp-lab-server
+    cmd: 'ip -br addr; echo; grep -H INTERFACESv4 /etc/default/isc-dhcp-server'
+  - id: dhcpd-conf
+    vm: dhcp-lab-server
+    cmd: grep -vE '^\s*#|^\s*$' /etc/dhcp/dhcpd.conf
+  # The DORA exchange, captured for real: tcpdump on the server while the
+  # client is made to drop and re-acquire its lease.
+  - id: dora
+    cmd: |
+      set -u
+      qlab shell dhcp-lab-server --no-wait -c \
+        'sudo timeout 30 tcpdump -i any -n -c 12 port 67 or port 68' > /tmp/qlab-dora.txt 2>&1 &
+      cap=$!
+      sleep 4
+      qlab shell dhcp-lab-client --no-wait -c \
+        'IF=$(ip -o link | grep -i 52:54:00:00:03:02 | cut -d: -f2 | tr -d " "); sudo dhclient -r "$IF" >/dev/null 2>&1; sleep 1; sudo dhclient -v "$IF"' \
+        > /tmp/qlab-dhclient.txt 2>&1
+      wait $cap
+      echo "--- on the server: tcpdump -i any -n port 67 or port 68 ---"
+      grep -aE 'BOOTP|Discover|Offer|Request|ACK|Reply' /tmp/qlab-dora.txt | head -12
+      echo
+      echo "--- on the client: dhclient -v ---"
+      grep -aE 'DHCP(DISCOVER|OFFER|REQUEST|ACK)|bound to' /tmp/qlab-dhclient.txt | head -10
+
+  - id: client-addr
+    vm: dhcp-lab-client
+    cmd: ip -br addr
+
+  - id: leases
+    vm: dhcp-lab-server
+    cmd: sed -n '/^lease/,/^}/p' /var/lib/dhcp/dhcpd.leases | tail -20
+  - id: client-lease
+    vm: dhcp-lab-client
+    cmd: sudo sed -n '/^lease/,/^}/p' /var/lib/dhcp/dhclient.leases 2>/dev/null | tail -16 || echo '(no client lease file on this image)'
+
+  - id: qlab-test
+    cmd: qlab test dhcp-lab 2>&1 || true

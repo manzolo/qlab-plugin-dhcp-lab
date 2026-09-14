@@ -1,0 +1,16 @@
+}
+lease {
+  interface "ens4";
+  fixed-address 192.168.100.101;
+  option subnet-mask 255.255.255.0;
+  option routers 192.168.100.1;
+  option dhcp-lease-time 600;
+  option dhcp-message-type 5;
+  option domain-name-servers 8.8.8.8,8.8.4.4;
+  option dhcp-server-identifier 192.168.100.1;
+  option broadcast-address 192.168.100.255;
+  option domain-name "dhcp-lab.local";
+  renew 1 2026/09/14 06:31:30;
+  rebind 1 2026/09/14 06:36:14;
+  expire 1 2026/09/14 06:37:29;
+}

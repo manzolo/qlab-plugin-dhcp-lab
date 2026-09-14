@@ -1,0 +1,13 @@
+--- on the server: tcpdump -i any -n port 67 or port 68 ---
+06:27:27.076328 ens4  In  IP 192.168.100.100.68 > 192.168.100.1.67: BOOTP/DHCP, Request from 52:54:00:00:03:02, length 300
+06:27:28.123100 ens4  B   IP 0.0.0.0.68 > 255.255.255.255.67: BOOTP/DHCP, Request from 52:54:00:00:03:02, length 300
+06:27:29.123479 ens4  Out IP 192.168.100.1.67 > 192.168.100.101.68: BOOTP/DHCP, Reply, length 300
+06:27:29.124014 ens4  B   IP 0.0.0.0.68 > 255.255.255.255.67: BOOTP/DHCP, Request from 52:54:00:00:03:02, length 300
+06:27:29.129241 ens4  Out IP 192.168.100.1.67 > 192.168.100.101.68: BOOTP/DHCP, Reply, length 300
+
+--- on the client: dhclient -v ---
+DHCPDISCOVER on ens4 to 255.255.255.255 port 67 interval 3 (xid=0x11d0d637)
+DHCPOFFER of 192.168.100.101 from 192.168.100.1
+DHCPREQUEST for 192.168.100.101 on ens4 to 255.255.255.255 port 67 (xid=0x37d6d011)
+DHCPACK of 192.168.100.101 from 192.168.100.1 (xid=0x11d0d637)
+bound to 192.168.100.101 -- renewal in 241 seconds.

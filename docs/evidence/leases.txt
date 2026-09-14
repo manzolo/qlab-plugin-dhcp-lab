@@ -1,0 +1,20 @@
+  client-hostname "dhcp-lab-client";
+}
+lease 192.168.100.101 {
+  starts 1 2026/09/14 06:26:12;
+  ends 1 2026/09/14 06:27:27;
+  tstp 1 2026/09/14 06:27:27;
+  cltt 1 2026/09/14 06:26:12;
+  binding state free;
+  hardware ethernet 52:54:00:00:03:02;
+}
+lease 192.168.100.101 {
+  starts 1 2026/09/14 06:27:29;
+  ends 1 2026/09/14 06:37:29;
+  cltt 1 2026/09/14 06:27:29;
+  binding state active;
+  next binding state free;
+  rewind binding state free;
+  hardware ethernet 52:54:00:00:03:02;
+  client-hostname "dhcp-lab-client";
+}

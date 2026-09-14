@@ -1,0 +1,72 @@
+[INFO] Running tests for plugin 'dhcp-lab'...
+
+
+=========================================
+  dhcp-lab — Automated Test Suite
+=========================================
+
+  [INFO] Server port: 2225
+  [INFO] Client port: 2226
+  [PASS] Server VM reachable
+  [PASS] Client VM reachable
+  [PASS] Server cloud-init done
+  [PASS] Client cloud-init done
+
+Exercise 1 — DHCP Anatomy
+
+  [PASS] isc-dhcp-server is active
+  [PASS] Server has 192.168.100.1
+  [PASS] dhcpd.conf exists
+  [PASS] Subnet 192.168.100.0 configured
+  [PASS] Range configured
+  [PASS] Port 67 listening
+
+  Exercise 1: All 6 checks passed
+
+Exercise 2 — Client Lease
+
+  [PASS] Client has IP in 192.168.100.x range
+  [PASS] Client can ping server
+  [PASS] Client lease file exists
+
+  Exercise 2: All 3 checks passed
+
+Exercise 3 — Server Leases
+
+  [PASS] Server lease file exists
+  [PASS] Lease file has entries
+  [PASS] DHCP service running
+
+  Exercise 3: All 3 checks passed
+
+Exercise 4 — DHCP Configuration
+
+  [PASS] Domain name configured
+  [PASS] DNS servers configured
+  [PASS] Default lease time set
+  [PASS] Max lease time set
+  [PASS] Subnet mask configured
+  [PASS] Router option set
+  [PASS] Server is authoritative
+
+  Exercise 4: All 7 checks passed
+
+Exercise 5 — Troubleshooting
+
+  [PASS] tcpdump available on server
+  [PASS] DHCP logs accessible
+  [PASS] DHCP interface configured
+  [PASS] Server can reach own IP
+
+  Exercise 5: All 4 checks passed
+
+=========================================
+  Final Report
+=========================================
+
+  Exercises run:     5
+  Exercises passed:  5
+  Exercises failed:  0
+  Exercises skipped: 0
+
+  All exercises passed!
