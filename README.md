@@ -1,149 +1,47 @@
-# dhcp-lab — DHCP Configuration Lab
+# dhcp-lab — DHCP Server & Client Lab
 
 [![QLab Plugin](https://img.shields.io/badge/QLab-Plugin-blue)](https://github.com/manzolo/qlab)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![Platform](https://img.shields.io/badge/Platform-Linux-lightgrey)](https://github.com/manzolo/qlab)
+[![Walkthrough](https://img.shields.io/badge/walkthrough-EN%20%26%20IT-informational)](docs/walkthrough-en.pdf)
 
-A [QLab](https://github.com/manzolo/qlab) plugin that boots two virtual machines for practicing DHCP server configuration and understanding dynamic IP addressing.
+A two-VM [QLab](https://github.com/manzolo/qlab) lab on a private LAN — an `isc-dhcp-server`
+and a client that leases from it — for watching the DORA handshake happen and shaping it:
+lease times, options, static reservations and multiple pools.
 
-## Architecture
+## Quick start
 
-```
-    Internal LAN (192.168.100.0/24)
-┌─────────────────────────────────────┐
-│                                     │
-│  ┌─────────────────┐  ┌─────────────────┐
-│  │ dhcp-lab-server │  │ dhcp-lab-client │
-│  │ SSH: dynamic    │  │ SSH: dynamic    │
-│  │ 192.168.100.1   │──►  IP via DHCP    │
-│  │ isc-dhcp-server │  │  (.100-.200)    │
-│  └─────────────────┘  └─────────────────┘
-│                                     │
-└─────────────────────────────────────┘
+```bash
+qlab install dhcp-lab
+qlab run dhcp-lab             # boots 2 VMs (~90s)
+qlab shell dhcp-lab-server    # isc-dhcp-server — labuser / labpass
+qlab shell dhcp-lab-client    # leases its IP  — labuser / labpass
+qlab test dhcp-lab            # run the automated checks
+qlab stop dhcp-lab
 ```
 
-## Objectives
+## What's inside
 
-- Understand the DHCP DORA process (Discover, Offer, Request, Ack)
-- Configure isc-dhcp-server with subnets and address pools
-- Set DHCP options (gateway, DNS, lease time, domain name)
-- Configure static/reserved IP assignments by MAC address
-- Monitor DHCP traffic with tcpdump
-- Practice releasing and renewing leases
-
-## How It Works
-
-1. **Cloud image**: Downloads a minimal Ubuntu 22.04 cloud image (~250MB)
-2. **Cloud-init**: Creates `user-data` for both VMs with DHCP packages
-3. **ISO generation**: Packs cloud-init files into ISOs (cidata)
-4. **Overlay disks**: Creates COW disks for each VM (original stays untouched)
-5. **QEMU boot**: Starts both VMs with SSH access and a shared internal LAN
-
-## Credentials
-
-Both VMs use the same credentials:
-- **Username:** `labuser`
-- **Password:** `labpass`
+| # | Exercise | What you do |
+|---|----------|-------------|
+| 1 | Verify the setup | server running, client leased, connectivity |
+| 2 | Observe DORA | capture the 4-step handshake live with tcpdump |
+| 3 | Modify options | lease times, DNS servers, domain name |
+| 4 | Static reservation | pin a fixed IP to the client's MAC |
+| 5 | Multiple pools | separate pools with allow/deny rules |
 
 ## Network
 
-| VM              | SSH (host) | Internal LAN IP     |
-|-----------------|------------|---------------------|
-| dhcp-lab-server | dynamic    | 192.168.100.1 (static) |
-| dhcp-lab-client | dynamic    | assigned via DHCP   |
+Private LAN `192.168.100.0/24`, isolated between the two VMs.
 
-> All host ports are dynamically allocated. Use `qlab ports` to see the actual mappings.
+| VM | Address | Role |
+|----|---------|------|
+| `dhcp-lab-server` | `192.168.100.1` | `isc-dhcp-server` |
+| `dhcp-lab-client` | via DHCP (`.100`–`.200`) | leases from the server |
 
-The VMs are connected by a direct internal LAN (`192.168.100.0/24`) via QEMU socket networking. The server assigns addresses from the pool `192.168.100.100` - `192.168.100.200`.
+SSH: `labuser` / `labpass`, dynamically forwarded — see `qlab ports`.
 
-## Walkthrough
+## Learn more
 
-`docs/` holds an illustrated account of a real run — every block of output in it
-was captured while the lab was running, not written by hand.
-
-| English | Italiano |
-|---|---|
-| [`docs/walkthrough-en.pdf`](docs/walkthrough-en.pdf) | [`docs/walkthrough-it.pdf`](docs/walkthrough-it.pdf) |
-
-Rebuild them, or refresh the captured output from a lab you have running:
-
-```bash
-# from the qlab checkout
-python3 tools/walkthrough/build.py ../qlab-plugin-dhcp-lab        # English
-python3 tools/walkthrough/build.py ../qlab-plugin-dhcp-lab -it    # Italian
-python3 tools/walkthrough/build.py ../qlab-plugin-dhcp-lab --live # re-capture first
-```
-
-## Usage
-
-```bash
-# Install the plugin
-qlab install dhcp-lab
-
-# Run the lab (starts both VMs)
-qlab run dhcp-lab
-
-# Wait ~90s for boot and package installation, then:
-
-# Connect to the server VM
-qlab shell dhcp-lab-server
-
-# Connect to the client VM
-qlab shell dhcp-lab-client
-
-# Stop both VMs
-qlab stop dhcp-lab
-
-# Stop a single VM
-qlab stop dhcp-lab-server
-qlab stop dhcp-lab-client
-```
-
-## Exercises
-
-> **New to DHCP?** See the [Step-by-Step Guide](guide.md) for complete walkthroughs with full config examples.
-
-| # | Exercise | What you'll do |
-|---|----------|----------------|
-| 1 | **Verify DHCP setup** | Check the server is running, verify the client got an IP, test connectivity |
-| 2 | **Observe DORA** | Use tcpdump to capture the 4-step DHCP handshake in real time |
-| 3 | **Modify DHCP options** | Change lease times, DNS servers, and domain name |
-| 4 | **Static reservation** | Reserve a fixed IP for the client's MAC address |
-| 5 | **Multiple pools** | Create separate pools with allow/deny rules |
-
-## Automated Tests
-
-An automated test suite validates the exercises against running VMs:
-
-```bash
-# Start the lab first
-qlab run dhcp-lab
-# Wait ~90s for cloud-init, then run all tests
-qlab test dhcp-lab
-```
-
-## Managing VMs
-
-```bash
-# View boot logs
-qlab log dhcp-lab-server
-qlab log dhcp-lab-client
-
-# Check running VMs
-qlab status
-```
-
-## Resetting
-
-To start fresh, stop and re-run:
-
-```bash
-qlab stop dhcp-lab
-qlab run dhcp-lab
-```
-
-Or reset the entire workspace:
-
-```bash
-qlab reset
-```
+- 📖 **[Step-by-step guide](guide.md)** — every exercise with full commands and captures
+- 📄 **Illustrated walkthrough** — a real run, captured live: **[English](docs/walkthrough-en.pdf)** · **[Italiano](docs/walkthrough-it.pdf)**
+- 🧩 **[QLab](https://github.com/manzolo/qlab)** — the plugin runner: how install, overlays and cloud-init work
